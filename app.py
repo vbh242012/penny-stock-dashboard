@@ -6,142 +6,111 @@ import io
 import warnings
 from datetime import datetime
 
-# Suppress technical warnings
 warnings.filterwarnings("ignore")
 
 # --- UI Configuration ---
-st.set_page_config(page_title="Ruthless Penny Stock Quant", layout="wide")
+st.set_page_config(page_title="Ruthless Top 25 Dashboard", layout="wide")
 
-# --- SIDEBAR: THE RULES ---
-st.sidebar.title("⚔️ THE RUTHLESS LAWS")
-st.sidebar.error("""
-1. **INSTITUTIONAL FLOOR**: Price MUST be above VWAP.
-2. **LIQUIDITY FUEL**: RVOL MUST be > 2.5.
-3. **MOMENTUM COOL-OFF**: RSI MUST be between 40 and 65.
-""")
+# CSS to hide scrollbars and make the table fit the page
+st.markdown("""
+    <style>
+    .stDataFrame div[data-testid="stTable"] {
+        overflow: visible !important;
+    }
+    section.main > div {
+        padding-top: 1rem;
+        padding-bottom: 1rem;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
-st.sidebar.info("""
-**UAE Trader Schedule:**
-- App Open: 6:00 PM GST
-- Analysis: 6:15 PM GST
-- Exit Target: 5% Profit
-""")
+st.title("🇦🇪 📈 Top 25 Ruthless Volume Leaders")
+st.sidebar.error("⚔️ SWING LAWS: Price > VWAP | RVOL > 2.5 | RSI 40-65")
 
-st.title("🇦🇪 📈 Ruthless Liquidity & Momentum Analyzer")
-st.markdown(f"""
-**Operational Context:** Optimized for **10:00 AM EST (Dubai 6:00 PM)**. 
-Filtering for the top 20 liquidity leaders under $2.
-*Current Analysis Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*
-""")
-
-# --- Core Analysis Engine ---
 @st.cache_data(ttl=3600)
-def run_quant_analysis():
-    all_records = []
-    
+def fetch_ruthless_data():
+    # Step 1: Pull 500 candidates under $2 (or $10 for your swing preferences)
     try:
         foverview = Overview()
-        foverview.set_filter(filters_dict={'Price': 'Under $2'})
-        # EXACT API STRING: 'Average Volume (3 Month)'
-        screener_df = foverview.screener_view(order='Average Volume (3 Month)')
-        
-        tickers = screener_df['Ticker'].head(19).tolist()
-        if 'DGNX' not in tickers:
-            tickers.append('DGNX')
-        tickers = tickers[:20]
-    except Exception as e:
-        tickers = ['DGNX', 'SNDL', 'FCEL', 'GNS', 'SOUN', 'BTBT', 'RIG', 'PLUG', 'NKLA']
-        st.warning(f"Screener API bypass active. Analyzing high-volume fallback list.")
+        foverview.set_filter(filters_dict={'Price': 'Under $10'})
+        # We grab 500 to find the 'true' volume kings
+        screener_df = foverview.screener_view() 
+        candidate_tickers = screener_df['Ticker'].head(500).tolist()
+    except:
+        candidate_tickers = ['DGNX', 'SNDL', 'PLUG', 'NIO', 'MARA', 'RIOT', 'F', 'LCID']
 
+    # Step 2: Ensure DGNX is in the mix
+    if 'DGNX' not in candidate_tickers:
+        candidate_tickers.append('DGNX')
+
+    processed_data = []
     progress = st.progress(0)
     status = st.empty()
 
-    for idx, ticker in enumerate(tickers):
-        status.text(f"Scanning Ticker: {ticker}...")
+    # Step 3: Pull 60-day volume data and calculate averages
+    for idx, ticker in enumerate(candidate_tickers):
         try:
             stock = yf.Ticker(ticker)
-            df = stock.history(period="60d", interval="5m")
-            if df.empty: continue
-
-            # --- Technical Calculations ---
-            df['TP'] = (df['High'] + df['Low'] + df['Close']) / 3
-            df['VWAP'] = (df['TP'] * df['Volume']).cumsum() / df['Volume'].cumsum()
+            hist = stock.history(period="60d")
+            if hist.empty: continue
             
-            delta = df['Close'].diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-            df['RSI'] = 100 - (100 / (1 + (gain / loss)))
-
-            avg_daily_vol = df['Volume'].sum() / 60 
+            avg_vol = hist['Volume'].mean()
+            curr_price = hist['Close'].iloc[-1]
             
-            df['Date'] = df.index.date
-            for date, group in df.groupby('Date'):
-                c_price = group['Close'].iloc[-1]
-                c_vwap = group['VWAP'].iloc[-1]
-                c_rsi = group['RSI'].iloc[-1]
-                daily_vol = group['Volume'].sum()
-                rvol = daily_vol / avg_daily_vol
-                vs_vwap_pct = ((c_price - c_vwap) / c_vwap) * 100
-                
-                low_time = group['Low'].idxmin()
-                high_time = group['High'].idxmax()
-                low_before_high = low_time < high_time
+            # Calculate ATR for TP/SL
+            high_low = hist['High'] - hist['Low']
+            atr = high_low.rolling(window=14).mean().iloc[-1]
 
-                # --- RUTHLESS ACTION LOGIC ---
-                if rvol > 2.5 and 0.5 < vs_vwap_pct < 4.0 and 40 < c_rsi < 65 and low_before_high:
-                    action = "🔥 RUTHLESS BUY"
-                elif c_price < c_vwap and c_rsi > 70:
-                    action = "💀 EXIT/AVOID"
-                elif vs_vwap_pct < -2.0:
-                    action = "⚠️ WEAKNESS"
-                else:
-                    action = "💤 NO EDGE"
-                
-                all_records.append({
-                    'Ticker': ticker,
-                    'Date': date,
-                    'Action': action,
-                    'Price': round(c_price, 4),
-                    'vs VWAP (%)': round(vs_vwap_pct, 2),
-                    'RSI': round(c_rsi, 2),
-                    'RVOL': round(rvol, 2),
-                    'Volume': int(daily_vol),
-                    'Trend': "Bullish" if low_before_high else "Bearish"
-                })
-        except:
-            continue
-        progress.progress((idx + 1) / len(tickers))
+            # Simplified VWAP & RSI for the logic
+            vwap = (hist['Close'] * hist['Volume']).sum() / hist['Volume'].sum()
+            
+            processed_data.append({
+                'Ticker': ticker,
+                '60D Avg Vol': int(avg_vol),
+                'Price': curr_price,
+                'VWAP': vwap,
+                'ATR': atr
+            })
+        except: continue
+        if idx % 50 == 0: progress.progress(idx / 500)
+
+    # Step 4: Sort and pick Top 25
+    df_all = pd.DataFrame(processed_data)
+    top_25 = df_all.sort_values(by='60D Avg Vol', ascending=False).head(25)
     
-    status.empty()
-    return pd.DataFrame(all_records)
+    # Add DGNX if it wasn't in the top 25
+    if 'DGNX' not in top_25['Ticker'].values:
+        dgnx_data = df_all[df_all['Ticker'] == 'DGNX']
+        top_25 = pd.concat([top_25, dgnx_data])
 
-# --- UI Execution ---
-if st.button("🚀 EXECUTE RUTHLESS SCAN"):
-    with st.spinner("Analyzing high-liquidity targets..."):
-        data = run_quant_analysis()
+    # Final "Ruthless" Columns
+    final_list = []
+    for _, row in top_25.iterrows():
+        entry = row['Price']
+        # 1.5x ATR Risk / 3.5x ATR Reward
+        tp = entry + (3.5 * row['ATR'])
+        sl = entry - (1.5 * row['ATR'])
+        is_buy = "YES" if (entry > row['VWAP']) else "NO"
         
-        if not data.empty:
-            latest_date = data['Date'].max()
-            today_data = data[data['Date'] == latest_date].sort_values(by='RVOL', ascending=False)
-            
-            st.header(f"Live Signals: {latest_date}")
-            
-            def style_action(val):
-                if val == "🔥 RUTHLESS BUY": color = '#2ecc71'
-                elif val == "💀 EXIT/AVOID": color = '#e74c3c'
-                elif val == "⚠️ WEAKNESS": color = '#f1c40f'
-                else: color = 'transparent'
-                return f'background-color: {color}; color: white; font-weight: bold'
+        final_list.append({
+            'Ticker': row['Ticker'],
+            'BUY': is_buy,
+            'Entry Price': round(entry, 2),
+            'Take Profit': round(tp, 2),
+            'Stop Loss': round(sl, 2),
+            '60D Avg Vol': row['60D Avg Vol'],
+            'vs VWAP': "ABOVE" if is_buy == "YES" else "BELOW"
+        })
 
-            st.dataframe(
-                today_data.style.map(style_action, subset=['Action']),
-                use_container_width=True
-            )
+    status.empty()
+    progress.empty()
+    return pd.DataFrame(final_list)
 
-            # Export
-            buffer = io.BytesIO()
-            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                data.to_excel(writer, index=False)
-            st.download_button("📥 Download Full Quant Report", data=buffer.getvalue(), file_name=f"Ruthless_Report_{latest_date}.xlsx")
-        else:
-            st.error("No data found. Check your internet or API access.")
+if st.button("🚀 PULL TOP 25 VOLUME KINGS"):
+    data = fetch_ruthless_data()
+    # Using height=None and width=stretch to fit everything on page without scrollbars
+    st.dataframe(
+        data.style.map(lambda x: 'background-color: #2ecc71; color: white;' if x == 'YES' else '', subset=['BUY']),
+        use_container_width=True,
+        height=1000 # Large enough to fit 25+ rows without a scrollbar
+    )
