@@ -15,7 +15,7 @@ st.set_page_config(page_title="Ruthless Penny Stock Quant", layout="wide")
 st.title("🇦🇪 📈 Ruthless Liquidity & Momentum Analyzer")
 st.markdown(f"""
 **Operational Context:** Optimized for **10:00 AM EST (Dubai 6:00 PM)**. 
-This app filters for the 20 highest-volume leaders under $2 and applies a predatory entry logic based on Institutional Support (VWAP), Momentum (RSI), and Fuel (RVOL).
+This app filters for the 20 highest-volume leaders under $2 and applies predatory entry logic based on VWAP, RSI, and RVOL.
 *Current Analysis Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*
 """)
 
@@ -28,7 +28,7 @@ def run_quant_analysis():
     try:
         foverview = Overview()
         foverview.set_filter(filters_dict={'Price': 'Under $2'})
-        # We sort by 'Average Volume' to find stocks with consistent institutional 'churn'
+        # Sorting by 'Average Volume' to find stocks with consistent institutional interest
         screener_df = foverview.screener_view(order='Average Volume')
         
         tickers = screener_df['Ticker'].head(19).tolist()
@@ -46,12 +46,12 @@ def run_quant_analysis():
         status.text(f"Scanning Ticker: {ticker}...")
         try:
             stock = yf.Ticker(ticker)
-            # 60 days of 5-minute data is the gold standard for intraday probability
+            # 60 days of 5-minute data
             df = stock.history(period="60d", interval="5m")
             if df.empty: continue
 
             # --- Technical Calculations ---
-            # 1. VWAP (The Institutional Line in the Sand)
+            # 1. VWAP (The Institutional Support Line)
             df['TP'] = (df['High'] + df['Low'] + df['Close']) / 3
             df['VWAP'] = (df['TP'] * df['Volume']).cumsum() / df['Volume'].cumsum()
             
@@ -79,7 +79,7 @@ def run_quant_analysis():
                 low_before_high = low_time < high_time
 
                 # --- RUTHLESS ACTION LOGIC ---
-                # Entry: RVOL > 2.5 (Massive Interest), Above VWAP (Support), RSI 45-60 (Not exhausted)
+                # Entry: RVOL > 2.5 (Massive Interest), Above VWAP (Support), RSI 40-65 (Cooling/Rising)
                 if rvol > 2.5 and 0.5 < vs_vwap_pct < 4.0 and 40 < c_rsi < 65 and low_before_high:
                     action = "🔥 RUTHLESS BUY"
                 elif c_price < c_vwap and c_rsi > 70:
@@ -118,9 +118,9 @@ if st.button("🚀 EXECUTE RUTHLESS SCAN"):
             today_data = data[data['Date'] == latest_date].sort_values(by='RVOL', ascending=False)
             
             st.header(f"Live Signals: {latest_date}")
-            st.caption("Sorted by Relative Volume (RVOL) - The higher the RVOL, the stronger the move.")
+            st.caption("Sorted by Relative Volume (RVOL) - Look for RVOL > 2.5 for the highest probability.")
 
-            # Custom Styling
+            # Custom Styling (Fixed for Pandas 2.1+)
             def style_action(val):
                 if val == "🔥 RUTHLESS BUY": color = '#2ecc71' # Green
                 elif val == "💀 EXIT/AVOID": color = '#e74c3c' # Red
@@ -128,8 +128,9 @@ if st.button("🚀 EXECUTE RUTHLESS SCAN"):
                 else: color = 'transparent'
                 return f'background-color: {color}; color: white; font-weight: bold'
 
+            # Use .map instead of .applymap for compatibility with newer Pandas
             st.dataframe(
-                today_data.style.applymap(style_action, subset=['Action']),
+                today_data.style.map(style_action, subset=['Action']),
                 use_container_width=True
             )
 
@@ -148,7 +149,6 @@ if st.button("🚀 EXECUTE RUTHLESS SCAN"):
             # --- Excel Download ---
             buffer = io.BytesIO()
             with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                # Provide full 60-day history in the Excel for backtesting
                 data.to_excel(writer, index=False, sheet_name='60Day_Quant_History')
             
             st.download_button(
@@ -158,12 +158,12 @@ if st.button("🚀 EXECUTE RUTHLESS SCAN"):
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            st.error("No data retrieved. Check internet connection or API status.")
+            st.error("No data retrieved. API or Network issue.")
 
-st.sidebar.title("Trader's Checklist")
+st.sidebar.title("Execution Checklist")
 st.sidebar.markdown("""
-1. **Wait for 10:00 AM EST**: Let the 9:30 AM gap-and-crap finish.
-2. **Confirm VWAP**: Only buy if the Green highlight appears.
-3. **Check RVOL**: If RVOL is < 2.0, the move lacks 'Fuel'.
-4. **Target 5%**: In penny stocks, 5% is a massive win. Take it.
+1. **Time Check**: Is it 6:00 PM GST? (10:00 AM EST).
+2. **Support Check**: Is the price sitting just above the VWAP?
+3. **Volume Check**: Is RVOL over 2.5? (Fuel check).
+4. **Target**: Take 5% profit and exit.
 """)
