@@ -100,44 +100,40 @@ if st.button("Run Intraday Quant Analysis"):
             
             st.divider()
             
-            # --- THE ANALYSIS ENGINE ---
-            st.header("🧠 Intraday Trading Insights")
-            
-            # Filter for "Tradable Days": Low happened before High, and stock moved up more than 2%
-            tradable_days = final_df[(final_df['Low Before High'] == True) & (final_df['Rise from Open (%)'] > 2.0)]
-            
-            if not tradable_days.empty:
-                best_buy = tradable_days['Time of Low'].mode()[0]
-                best_sell = tradable_days['Time of High'].mode()[0]
-                win_rate = (len(tradable_days) / len(final_df)) * 100
+            # --- THE ENHANCED ANALYSIS ENGINE ---
+            st.header("🔬 High-Probability Pattern Analysis")
+
+            # 1. Define "High Quality" Days (Price > Open AND Volatility was present)
+            high_quality_days = final_df[
+                (final_df['Rise from Open (%)'] > 3.0) & 
+                (final_df['Low Before High'] == True) &
+                (final_df['Volume'] > final_df['Volume'].median())
+            ]
+
+            if not high_quality_days.empty:
+                # Statistical 'Golden Windows'
+                best_buy_window = high_quality_days['Time of Low'].mode()[0]
+                best_sell_window = high_quality_days['Time of High'].mode()[0]
                 
-                col1, col2, col3 = st.columns(3)
-                col1.metric("Optimal Historical Buy Time (EST)", best_buy, "Based on daily lows")
-                col2.metric("Optimal Historical Sell Time (EST)", best_sell, "Based on daily highs")
-                col3.metric("Ideal Setup Frequency", f"{win_rate:.1f}%", "Days where Low preceded High > 2%")
+                # Calculate Average Profit Potential
+                avg_swing = high_quality_days['Rise from Open (%)'].mean()
                 
-                st.info(f"**Analysis Conclusion:** Historically, over the last 60 days for these volume leaders, the most frequent intraday dip occurred at **{best_buy}**. The most frequent peak of the day occurred at **{best_sell}**. Note that this represents statistical frequency, not a guarantee of future movement.")
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Optimal Buy Setup (EST)", best_buy_window, "Post-Open Dip")
+                c2.metric("Optimal Sell Peak (EST)", best_sell_window, "Momentum Exit")
+                c3.metric("Avg. Profit Potential", f"{avg_swing:.2f}%", "On 'Green' Days")
+
+                st.subheader("💡 Recommended Trading Pattern")
+                st.markdown(f"""
+                **The "10 AM Reversal" Pattern:**
+                * **Observation:** In {len(high_quality_days)} successful sessions, the bottom was most often set at **{best_buy_window}**. 
+                * **Strategy:** Avoid buying in the first 15 minutes. Look for a stock that drops from the open, stabilizes, and starts to rise again around **10:00 AM - 10:15 AM**.
+                * **Exit:** Statistical peaks for these volume leaders cluster at **{best_sell_window}**. Setting a limit order 5-10 minutes *before* this time increases fill probability.
+                """)
+                
+                # Heatmap of Profitability by Time
+                st.write("### Probability Distribution (Time of Daily High)")
+                time_counts = high_quality_days['Time of High'].value_counts().head(10)
+                st.bar_chart(time_counts)
             else:
-                st.warning("Not enough volatility data to calculate optimal times.")
-
-            st.divider()
-
-            # --- DATA DISPLAY ---
-            st.header("Raw Dataset")
-            display_df = final_df.copy()
-            display_df['Volume'] = display_df['Volume'].apply(lambda x: f"{x:,}")
-            st.dataframe(display_df, use_container_width=True)
-            
-            # Export
-            buffer = io.BytesIO()
-            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                final_df.to_excel(writer, index=False, sheet_name='Quant Data')
-            
-            st.download_button(
-                label="📥 Download Full Dataset as Excel",
-                data=buffer.getvalue(),
-                file_name="500_Stocks_Quant_Data.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-        else:
-            st.error("No data could be fetched. You may have hit an API limit.")
+                st.warning("Insufficient high-volatility data to generate patterns.")
