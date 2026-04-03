@@ -2,115 +2,103 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 from finvizfinance.screener.overview import Overview
-import io
 import warnings
-from datetime import datetime
 
 warnings.filterwarnings("ignore")
 
-# --- UI Configuration ---
-st.set_page_config(page_title="Ruthless Top 25 Dashboard", layout="wide")
+st.set_page_config(page_title="Penny Scalper (<$2)", layout="wide")
 
-# CSS to hide scrollbars and make the table fit the page
+# CSS to expand table and hide scrollbars for clean full-page view
 st.markdown("""
     <style>
-    .stDataFrame div[data-testid="stTable"] {
-        overflow: visible !important;
-    }
-    section.main > div {
-        padding-top: 1rem;
-        padding-bottom: 1rem;
-    }
+    .stDataFrame div[data-testid="stTable"] { overflow: visible !important; }
+    .stDataFrame [data-testid="styled-data-frame"] { height: auto !important; }
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🇦🇪 📈 Top 25 Ruthless Volume Leaders")
-st.sidebar.error("⚔️ SWING LAWS: Price > VWAP | RVOL > 2.5 | RSI 40-65")
+st.title("💰 Ruthless Penny Scalper (<$2)")
+st.sidebar.error("""
+**⚔️ RUTHLESS LAWS (PENNY)**
+1. **FLOOR**: Price > VWAP.
+2. **FUEL**: RVOL > 2.5.
+3. **MOMENTUM**: RSI 40-65.
+4. **EXIT**: Take 5-8% quickly.
+""")
 
 @st.cache_data(ttl=3600)
-def fetch_ruthless_data():
-    # Step 1: Pull 500 candidates under $2 (or $10 for your swing preferences)
+def get_penny_data():
     try:
-        foverview = Overview()
-        foverview.set_filter(filters_dict={'Price': 'Under $10'})
-        # We grab 500 to find the 'true' volume kings
-        screener_df = foverview.screener_view() 
-        candidate_tickers = screener_df['Ticker'].head(500).tolist()
+        f = Overview()
+        f.set_filter(filters_dict={'Price': 'Under $2'})
+        # Pulling the entire matching universe
+        full_universe = f.screener_view()
+        tickers = full_universe['Ticker'].tolist()
     except:
-        candidate_tickers = ['DGNX', 'SNDL', 'PLUG', 'NIO', 'MARA', 'RIOT', 'F', 'LCID']
-
-    # Step 2: Ensure DGNX is in the mix
-    if 'DGNX' not in candidate_tickers:
-        candidate_tickers.append('DGNX')
-
-    processed_data = []
-    progress = st.progress(0)
+        tickers = ['SNDL', 'MULN', 'IDEX', 'TYDE']
+    
+    if 'DGNX' not in tickers:
+        tickers.append('DGNX')
+    
+    results = []
+    p = st.progress(0)
     status = st.empty()
-
-    # Step 3: Pull 60-day volume data and calculate averages
-    for idx, ticker in enumerate(candidate_tickers):
+    
+    total = len(tickers)
+    for i, t in enumerate(tickers):
+        status.text(f"Scanning {i}/{total}: {t}")
         try:
-            stock = yf.Ticker(ticker)
-            hist = stock.history(period="60d")
-            if hist.empty: continue
+            s = yf.Ticker(t)
+            # Use 5m interval for the 1-day VWAP/RSI precision
+            h = s.history(period="60d", interval="5m") 
+            if h.empty: continue
             
-            avg_vol = hist['Volume'].mean()
-            curr_price = hist['Close'].iloc[-1]
+            daily_h = s.history(period="60d")
+            avg_vol = daily_h['Volume'].mean()
+            price = h['Close'].iloc[-1]
             
-            # Calculate ATR for TP/SL
-            high_low = hist['High'] - hist['Low']
-            atr = high_low.rolling(window=14).mean().iloc[-1]
+            # VWAP Calculation (Institutional Floor)
+            vwap = (h['Close'] * h['Volume']).sum() / h['Volume'].sum()
+            
+            # ATR for Exit Strategy
+            tr = (h['High'] - h['Low']).rolling(14).mean().iloc[-1]
+            
+            # RSI 14
+            delta = h['Close'].diff()
+            up = delta.clip(lower=0).rolling(14).mean()
+            down = -delta.clip(upper=0).rolling(14).mean()
+            rsi = 100 - (100 / (1 + (up / down).iloc[-1]))
+            
+            rvol = h['Volume'].tail(78).sum() / avg_vol # Approx Daily RVOL
 
-            # Simplified VWAP & RSI for the logic
-            vwap = (hist['Close'] * hist['Volume']).sum() / hist['Volume'].sum()
-            
-            processed_data.append({
-                'Ticker': ticker,
-                '60D Avg Vol': int(avg_vol),
-                'Price': curr_price,
-                'VWAP': vwap,
-                'ATR': atr
+            # RUTHLESS BUY CONDITION
+            is_buy = "YES" if (price > vwap and 40 < rsi < 65 and rvol > 2.0) else "NO"
+
+            results.append({
+                'Ticker': t, 'BUY': is_buy, 'Entry Price': round(price, 4),
+                'Take Profit': round(price + (2.5 * tr), 4), 'Stop Loss': round(price - (1.2 * tr), 4),
+                'RSI': round(rsi, 1), 'RVOL': round(rvol, 2), '60D Avg Vol': int(avg_vol)
             })
         except: continue
-        if idx % 50 == 0: progress.progress(idx / 500)
-
-    # Step 4: Sort and pick Top 25
-    df_all = pd.DataFrame(processed_data)
-    top_25 = df_all.sort_values(by='60D Avg Vol', ascending=False).head(25)
+        p.progress((i + 1) / total)
     
-    # Add DGNX if it wasn't in the top 25
-    if 'DGNX' not in top_25['Ticker'].values:
-        dgnx_data = df_all[df_all['Ticker'] == 'DGNX']
-        top_25 = pd.concat([top_25, dgnx_data])
-
-    # Final "Ruthless" Columns
-    final_list = []
-    for _, row in top_25.iterrows():
-        entry = row['Price']
-        # 1.5x ATR Risk / 3.5x ATR Reward
-        tp = entry + (3.5 * row['ATR'])
-        sl = entry - (1.5 * row['ATR'])
-        is_buy = "YES" if (entry > row['VWAP']) else "NO"
-        
-        final_list.append({
-            'Ticker': row['Ticker'],
-            'BUY': is_buy,
-            'Entry Price': round(entry, 2),
-            'Take Profit': round(tp, 2),
-            'Stop Loss': round(sl, 2),
-            '60D Avg Vol': row['60D Avg Vol'],
-            'vs VWAP': "ABOVE" if is_buy == "YES" else "BELOW"
-        })
+    df_results = pd.DataFrame(results)
+    
+    # Sort by Volume and pick Top 25
+    top_25 = df_results.sort_values('60D Avg Vol', ascending=False).head(25)
+    
+    # Ensure DGNX is present
+    if 'DGNX' not in top_25['Ticker'].values and 'DGNX' in df_results['Ticker'].values:
+        dgnx_row = df_results[df_results['Ticker'] == 'DGNX']
+        top_25 = pd.concat([top_25, dgnx_row])
 
     status.empty()
-    progress.empty()
-    return pd.DataFrame(final_list)
+    p.empty()
+    return top_25
 
-if st.button("🚀 PULL TOP 25 VOLUME KINGS"):
-    data = fetch_ruthless_data()
-    # Using height=None and width=stretch to fit everything on page without scrollbars
+if st.button("🚀 EXECUTE FULL PENNY SCAN"):
+    data = get_penny_data()
     st.dataframe(
         data.style.map(lambda x: 'background-color: #2ecc71; color: white;' if x == 'YES' else '', subset=['BUY']),
         use_container_width=True,
-        height=1000 # Large enough to fit 25+ rows without a scrollbar
+        height=1000
     )
