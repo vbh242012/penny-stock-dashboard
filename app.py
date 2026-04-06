@@ -16,16 +16,16 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- SIDEBAR: THE LAWS ---
-st.sidebar.title("⚔️ RUTHLESS PENNY LAWS")
-st.sidebar.markdown("""
-**1. THE FLOOR:** Price **MUST** be > VWAP.
-**2. THE FUEL:** RVOL **MUST** be > 2.5.
-**3. THE MOMENTUM:** RSI **MUST** be 40-65.
-**4. THE EXIT:** 2x ATR Profit / 1.2x ATR Risk.
-""")
-
+# --- HEADER RULES (Moved from Sidebar) ---
 st.title("💰 Ruthless Penny Stock Scalper (<$2)")
+
+st.info("""
+**⚔️ RUTHLESS PENNY LAWS**
+1. **THE FLOOR:** Price **MUST** be > VWAP.
+2. **THE FUEL:** RVOL **MUST** be > 2.5.
+3. **THE MOMENTUM:** RSI **MUST** be 40-65.
+4. **THE EXIT:** 2x ATR Profit / 1.2x ATR Risk.
+""")
 
 def format_ticker(t):
     return t.replace('-', '.')
